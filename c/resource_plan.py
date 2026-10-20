@@ -1811,6 +1811,9 @@ def _path_components(raw, description):
         return ()
     if not raw.startswith(b"/"):
         raise CgroupFormatError(f"{description} is not absolute: {raw!r}")
+    raw = os.path.normpath(raw)
+    if raw == b"/":
+        return ()
     components = raw[1:].split(b"/")
     if any(component in (b"", b".", b"..") for component in components):
         raise CgroupFormatError(f"unnormalized {description}: {raw!r}")
