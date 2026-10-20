@@ -120,7 +120,7 @@ const it: Record<string, string> = {
   "sidebar.endpoint": "Endpoint API",
   "sidebar.apiKey": "Chiave API",
   "sidebar.apiKeyPlaceholder": "opzionale",
-  "sidebar.apiKeyHelp": "Conservata solo in memoria · inviata a questo endpoint",
+  "sidebar.apiKeyHelp": "Conservata per questa scheda · inviata solo a questo endpoint",
   "sidebar.probe": "Sonda il server",
   "status.connected": "Motore raggiungibile",
   "status.notConnected": "Non connesso",

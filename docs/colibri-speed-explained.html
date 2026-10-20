@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Colibri speed, explained simply</title>
+<style>
+:root{color-scheme:light;--ink:#163043;--muted:#526777;--blue:#3066dc;--teal:#087f76;--orange:#b56912}*{box-sizing:border-box}body{margin:0;background:#f3f6fa;color:var(--ink);font:16px/1.6 system-ui,sans-serif}main{max-width:980px;margin:auto;padding:42px 22px}h1{font-size:clamp(30px,5vw,48px);line-height:1.15;margin:12px 0 20px}h2{font-size:24px;line-height:1.3;margin:0 0 16px}p{margin:12px 0}.eyebrow{color:var(--teal);font-weight:750;letter-spacing:.1em;font-size:12px;text-transform:uppercase}.lead{font-size:20px;max-width:760px}.card{background:white;border:1px solid #dce5ed;border-radius:20px;padding:26px;margin:24px 0;box-shadow:0 8px 28px #16304305}.note{color:var(--muted);font-size:14px}.pill{display:inline-block;background:#e2f3ed;color:#12634e;border-radius:24px;padding:7px 14px;font-weight:650}.controls{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}button{font:inherit;cursor:pointer;border:1px solid #bdccdb;border-radius:10px;padding:10px 16px;background:white;color:var(--ink)}button[aria-pressed=true]{background:var(--blue);color:white;border-color:var(--blue)}button:focus-visible,a:focus-visible,input:focus-visible,summary:focus-visible{outline:3px solid #c77d10;outline-offset:4px}.row{display:grid;grid-template-columns:180px 1fr 100px;gap:14px;align-items:center;margin:20px 0}.track{height:24px;background:#eef2f6;border-radius:6px;overflow:hidden}.fill{height:100%;background:#8298b0;transition:width .25s}.ours{background:var(--teal)}.warm{background:#ac8ab8}.value{text-align:right;font-weight:700}.stack{display:flex;min-height:60px;border-radius:12px;overflow:hidden;margin:20px 0}.stack span{display:flex;align-items:center;justify-content:center;color:white;font-weight:700}.prefill{background:var(--blue)}.decode{background:var(--teal)}table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:12px 6px;border-bottom:1px solid #e5ebf0}td:last-child,th:last-child{text-align:right}tfoot{font-weight:750}summary{cursor:pointer;font-weight:650;padding:12px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.stat{font-size:34px;font-weight:750;color:var(--blue)}input[type=range]{width:100%;accent-color:var(--blue)}a{color:var(--blue)}footer{font-size:14px;color:var(--muted);margin:28px 0}.scroll{overflow-x:auto}@media(max-width:600px){main{padding:24px 14px}.card{padding:20px}.row{grid-template-columns:1fr 80px;gap:5px}.row .track{grid-column:1/-1;grid-row:auto}.row .value{grid-column:2;grid-row:auto}.grid{grid-template-columns:1fr}.stack{font-size:13px}}@media print{body{background:white}.card{break-inside:avoid;box-shadow:none}.controls,input,button{display:none}main{padding:0}.fill,.stack span{print-color-adjust:exact}}
+</style>
+</head>
+<body>
+<main>
+<header><div class="eyebrow">Colibri · performance explainer</div>
+<h1>Our generation speed is within the published range.</h1>
+<p class="lead">Our recent results were <strong>6.9–8.3 tokens per second</strong>. Colibri reports <strong>5.1–9.6 tokens per second</strong> across its published INT4 CPU cache configurations.</p>
+<span class="pill">The main wait: processing the prompt</span>
+<p class="note">A static report based on the measurements discussed in this project. This page does not read live server data.</p></header>
+
+<section class="card" aria-labelledby="speed-title"><h2 id="speed-title">1. How fast does the answer appear?</h2>
+<p>Tokens are small pieces of text. More output tokens per second means faster answer generation <em>after prompt processing</em>.</p>
+<div class="controls" role="group" aria-label="Choose a measured request"><button type="button" data-speed="6.915" aria-pressed="true">117-second request</button><button type="button" data-speed="8.308" aria-pressed="false">46-second request</button></div>
+<div class="row"><span>Official · 32 experts</span><div class="track"><div class="fill" style="width:39.23%"></div></div><span class="value">5.1 tok/s</span></div>
+<div class="row"><strong>Our · 68 experts</strong><div class="track"><div id="our-bar" class="fill ours" style="width:53.19%"></div></div><span id="our-speed" class="value">6.92 tok/s</span></div>
+<div class="row"><span>Official · all 128</span><div class="track"><div class="fill" style="width:65.38%"></div></div><span class="value">8.5 tok/s</span></div>
+<div class="row"><span>Official · all 128</span><div class="track"><div class="fill" style="width:73.85%"></div></div><span class="value">9.6 tok/s</span></div>
+<div class="row"><span>Official · warm chat</span><div class="track"><div class="fill warm" style="width:100%"></div></div><span class="value">13 tok/s</span></div>
+<p id="comparison" aria-live="polite">Our selected result is inside the published 5.1–9.6 tok/s range.</p>
+<p class="note">Experts means cached experts per layer. Official cold CLI runs generated 128 tokens. The 13 tok/s result used a warm chat session and a 577-token answer; it is a different test condition.</p>
+</section>
+
+<section class="card"><h2>2. Why did one request take 117 seconds?</h2>
+<p>The server first processes the input, then generates the answer. The published generation speed describes the second stage.</p>
+<div class="stack" role="img" aria-label="Prompt processing and startup: approximately 71.7 seconds, 61 percent. Answer generation: approximately 45.7 seconds, 39 percent."><span class="prefill" style="width:61.07%">71.7 s · before output</span><span class="decode" style="width:38.93%">45.7 s · answer</span></div>
+<table><thead><tr><th scope="col">What the server was doing</th><th scope="col">Time</th></tr></thead><tbody><tr><td>Processing the prompt and other work before first output</td><td>71.7 s</td></tr><tr><td>Generating the answer</td><td>45.7 s</td></tr></tbody><tfoot><tr><td>Total request time</td><td>117.4 s</td></tr></tfoot></table>
+<p class="note">768 input tokens, no reported prompt-token reuse, and 316 output tokens. Time before first output is a practical proxy for prompt processing, but can include startup and other overhead. Values are rounded.</p>
+<details><summary>See the work inside the 45.7-second generation stage</summary><table><tbody><tr><td>Attention calculations</td><td>15.8 s</td></tr><tr><td>Loading expert weights from storage</td><td>12.0 s</td></tr><tr><td>Expert calculations</td><td>10.0 s</td></tr><tr><td>Other generation work</td><td>7.9 s</td></tr></tbody></table><p class="note">These are the previously reported profiler categories. They are inside generation time; do not add them to the total again. Rounded categories may differ slightly from the stage total.</p></details>
+</section>
+
+<section class="card"><h2>3. Explore what a shorter wait could look like</h2><p>Move the slider to reduce the time before output while keeping the same answer-generation time.</p>
+<label for="reduction">Illustrative reduction in time before output: <strong id="reduction-value">0%</strong></label><input id="reduction" type="range" min="0" max="90" step="10" value="0">
+<div class="grid" aria-live="polite"><div><div class="stat" id="estimated-total">117.4 s</div><div>Illustrative total request time</div></div><div><div class="stat" id="saved">0.0 s</div><div>Time saved</div></div></div>
+<p class="note">Illustration only, not a prediction or server setting. Calculation: 71.7 × (1 − reduction) + 45.7 seconds. Actual savings depend on prompt size, reusable context, cache behavior, and hardware.</p></section>
+
+<section class="card"><h2>4. Are these identical benchmark conditions?</h2><div class="scroll"><table><thead><tr><th scope="col">Condition</th><th scope="col">Our server</th><th scope="col">Official test</th></tr></thead><tbody><tr><td>CPU</td><td>Intel i5-12500 · 6 cores</td><td>Ryzen 7 PRO 8700GE · 8 cores</td></tr><tr><td>RAM</td><td>32 GB</td><td>64 GB</td></tr><tr><td>Storage</td><td>Single NVMe</td><td>NVMe RAID</td></tr><tr><td>Cached experts per layer</td><td>68</td><td>32 or 128</td></tr><tr><td>Model</td><td>Qwen3-Coder INT4</td><td>Qwen3-Coder-30B-A3B INT4</td></tr></tbody></table></div>
+<p>These results support saying <strong>our generation speed is broadly consistent with the published CPU benchmarks</strong>. They do not prove identical performance: hardware, prompt lengths, output lengths, and cache conditions differ.</p>
+<p>The repository also reports roughly <strong>two minutes to process a 500-token prompt from a cold cache</strong>. Slow initial prompt processing is therefore a limitation acknowledged by the project itself.</p>
+<details><summary>Two caches, two different jobs</summary><p><strong>Expert cache:</strong> keeps model expert weights in RAM so the server needs fewer storage reads.</p><p><strong>KV cache:</strong> stores attention information for processed tokens. If the engine supports and successfully matches a reusable prompt prefix, later requests can avoid some repeated computation.</p><p>A warm expert cache does not automatically mean prompt tokens were reused. The 117-second example reported zero reused prompt tokens.</p></details>
+</section>
+<footer>Sources: <a href="https://github.com/JustVugg/colibri/blob/main/docs/qwen36.md" target="_blank" rel="noopener noreferrer">Official Qwen3-Coder benchmark</a> · <a href="https://github.com/JustVugg/colibri" target="_blank" rel="noopener noreferrer">Colibri repository</a>. Local figures reproduce the recent results discussed in this project; they were not remeasured for this report. The document works offline; source links require internet access.<p><button type="button" id="print">Print / save as PDF</button></p></footer>
+</main>
+<script>
+document.querySelectorAll('[data-speed]').forEach(button=>button.addEventListener('click',()=>{
+ document.querySelectorAll('[data-speed]').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+ const speed=Number(button.dataset.speed);
+ document.getElementById('our-bar').style.width=(speed/13*100)+'%';
+ document.getElementById('our-speed').textContent=speed.toFixed(2)+' tok/s';
+ document.getElementById('comparison').textContent='At '+speed.toFixed(2)+' tok/s, our selected result is inside the published 5.1–9.6 tok/s range.';
+}));
+document.getElementById('reduction').addEventListener('input',event=>{
+ const percent=Number(event.target.value),saved=71.7*percent/100;
+ document.getElementById('reduction-value').textContent=percent+'%';
+ document.getElementById('estimated-total').textContent=(117.4-saved).toFixed(1)+' s';
+ document.getElementById('saved').textContent=saved.toFixed(1)+' s';
+});
+document.getElementById('print').addEventListener('click',()=>window.print());
+</script>
+</body>
+</html>

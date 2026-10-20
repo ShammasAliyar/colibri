@@ -68,7 +68,7 @@ export default function App() {
     if (servedByEngine && saved === "http://127.0.0.1:8000/v1" && defaultBase !== saved) return defaultBase
     return saved
   })
-  const [apiKey, setApiKey] = useState("")
+  const [apiKey, setApiKey] = useState(() => stored(sessionStorage, "colibri.apiKey", ""))
   const [models, setModels] = useState<string[]>([])
   /* Models the server marks with the image_generation capability. With one of
      them selected the conversation generates pictures instead of text. */
@@ -135,6 +135,12 @@ export default function App() {
   useEffect(() => {
     persistPublicSettings(localStorage, baseUrl, model)
   }, [baseUrl, model])
+  useEffect(() => {
+    try {
+      if (apiKey) sessionStorage.setItem("colibri.apiKey", apiKey)
+      else sessionStorage.removeItem("colibri.apiKey")
+    } catch { /* restricted storage mode */ }
+  }, [apiKey])
   useEffect(() => {
     try { localStorage.setItem("colibri.imageSize", sizeKey(imageSize)); localStorage.setItem("colibri.imageSteps", String(imageSteps)) } catch { /* restricted storage mode */ }
   }, [imageSize, imageSteps])
@@ -557,7 +563,7 @@ export default function App() {
           {settingsPage === "system" && <section className="settings-card">{runtimeControls}{metrics}</section>}
         </div>
       </section> : view === "brain" ? <BrainWorkspace baseUrl={baseUrl} apiKey={apiKey} connected={connected} />
-      : view === "profiling" ? <section className="profiling-workspace"><header className="page-heading"><span>COLIBRI / ENGINE</span><h1>Profiling</h1></header>{metrics}<Profiling baseUrl={baseUrl} apiKey={apiKey} connected={connected} /></section>
+      : view === "profiling" ? <section className="profiling-workspace"><header className="page-heading"><span>COLIBRI / ENGINE</span><h1>Inference Observatory</h1><p>Live requests from Continue, context shape, queueing and engine performance.</p></header>{metrics}<Profiling baseUrl={baseUrl} apiKey={apiKey} connected={connected} /></section>
       : <section className={cn("chat-view", empty && "empty")} hidden={view === "brio"}>
         {empty ? <div className="welcome-brand"><Brand word /></div> : <div className="conversation" role="log" aria-label={t("nav.chat")}>
           <div className="message-list">{messages.map((item, index) => <article key={item.id} className={cn("message", item.role)}>

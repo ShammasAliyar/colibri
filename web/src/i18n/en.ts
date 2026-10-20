@@ -123,7 +123,7 @@ const en: Record<string, string> = {
   "sidebar.endpoint": "API endpoint",
   "sidebar.apiKey": "API key",
   "sidebar.apiKeyPlaceholder": "optional",
-  "sidebar.apiKeyHelp": "Kept in memory only · sent to this endpoint",
+  "sidebar.apiKeyHelp": "Kept for this browser tab · sent only to this endpoint",
   "sidebar.probe": "Probe server",
   "status.connected": "Engine reachable",
   "status.notConnected": "Not connected",

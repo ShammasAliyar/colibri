@@ -10,7 +10,7 @@ const zhTW: Record<string, string> = {
   "sidebar.endpoint": "API 端點",
   "sidebar.apiKey": "API 金鑰",
   "sidebar.apiKeyPlaceholder": "選填",
-  "sidebar.apiKeyHelp": "僅保存在記憶體中 · 傳送到此端點",
+  "sidebar.apiKeyHelp": "儲存在此瀏覽器分頁中 · 僅傳送到此端點",
   "sidebar.probe": "探測伺服器",
   "status.connected": "引擎已連線",
   "status.notConnected": "未連線",

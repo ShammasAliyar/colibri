@@ -69,9 +69,19 @@ export interface HealthResponse {
   kv_slots?: number
   tiers?: TiersHealth
   hwinfo?: HwinfoHealth
+  model_storage_gb?: number
+  expert_cache_cap?: number
   /* Whether a message list ending on an assistant turn is continued rather than
      answered fresh (COLI_CONTINUE_ASSISTANT). Absent on older servers. */
   continue_assistant?: boolean
+}
+
+export interface ExpertMapResponse {
+  rows: number
+  cols: number
+  map: string
+  hits: string
+  seq: number
 }
 
 export interface ProfileTurn {
@@ -89,6 +99,49 @@ export interface ProfileTurn {
 export interface ProfileResponse {
   seq: number
   turns: ProfileTurn[]
+}
+
+export interface ActivityMessage {
+  index: number
+  role: string
+  chars: number
+  preview?: string
+}
+
+export interface ActivityRequest {
+  reused_tokens?: number
+  fresh_tokens?: number
+  id: string
+  endpoint: string
+  client: string
+  model?: string
+  state: "received" | "admitted" | "generating" | "streaming" | "completed" | "cancelled" | "failed"
+  started_at: number
+  finished_at?: number
+  elapsed_s: number
+  stream: boolean
+  max_tokens?: number
+  message_count: number
+  messages: ActivityMessage[]
+  context_chars: number
+  tool_count: number
+  tool_names: string[]
+  output_chars: number
+  prompt_tokens?: number | null
+  completion_tokens: number
+  queue_wait_ms?: number | null
+  first_output_ms?: number | null
+  tokens_per_second?: number
+  cache_hit_percent?: number
+  rss_gb?: number
+  profile?: ProfileTurn
+  error?: string
+}
+
+export interface ActivityResponse {
+  seq: number
+  content_capture: boolean
+  requests: ActivityRequest[]
 }
 
 export interface TokenUsage {
@@ -165,6 +218,18 @@ export async function getProfile(baseUrl: string, apiKey = "", signal?: AbortSig
   const response = await fetch(serverEndpoint(baseUrl, "profile"), { headers: headers(apiKey), signal })
   if (!response.ok) throw new Error(await responseError(response))
   return (await response.json()) as ProfileResponse
+}
+
+export async function getActivity(baseUrl: string, apiKey = "", signal?: AbortSignal): Promise<ActivityResponse> {
+  const response = await fetch(serverEndpoint(baseUrl, "activity"), { headers: headers(apiKey), signal })
+  if (!response.ok) throw new Error(await responseError(response))
+  return (await response.json()) as ActivityResponse
+}
+
+export async function getExperts(baseUrl: string, apiKey = "", signal?: AbortSignal): Promise<ExpertMapResponse> {
+  const response = await fetch(serverEndpoint(baseUrl, "experts"), { headers: headers(apiKey), signal })
+  if (!response.ok) throw new Error(await responseError(response))
+  return (await response.json()) as ExpertMapResponse
 }
 
 export function extractSSE(buffer: string) {

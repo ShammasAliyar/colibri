@@ -123,7 +123,7 @@ const id: Record<string, string> = {
   "sidebar.endpoint": "Endpoint API",
   "sidebar.apiKey": "Kunci API",
   "sidebar.apiKeyPlaceholder": "opsional",
-  "sidebar.apiKeyHelp": "Hanya disimpan di memori · dikirim ke endpoint ini",
+  "sidebar.apiKeyHelp": "Disimpan untuk tab ini · hanya dikirim ke endpoint ini",
   "sidebar.probe": "Periksa server",
   "status.connected": "Engine dapat diakses",
   "status.notConnected": "Tidak terhubung",

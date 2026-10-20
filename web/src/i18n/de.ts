@@ -13,7 +13,7 @@ const de: Record<string, string> = {
   "sidebar.endpoint": "API-Endpunkt",
   "sidebar.apiKey": "API-Schlüssel",
   "sidebar.apiKeyPlaceholder": "optional",
-  "sidebar.apiKeyHelp": "Nur im Speicher · wird an diesen Endpunkt gesendet",
+  "sidebar.apiKeyHelp": "Für diesen Browser-Tab gespeichert · nur an diesen Endpunkt gesendet",
   "sidebar.probe": "Server prüfen",
   "status.connected": "Engine erreichbar",
   "status.notConnected": "Nicht verbunden",

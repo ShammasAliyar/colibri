@@ -5363,7 +5363,6 @@ static int q36_serve_start(Model *m, ServeReq *q, int **ids_out, int *np_out, fl
                 q->max_tok, budget, max_ctx, np);
         q->max_tok = budget;
     }
-    printf("ACCEPT %s %d\n",q->id,np); fflush(stdout);
     m->max_t = np + q->max_tok;
     /* Grow the cache BEFORE deciding, so the decision sees the state that will
      * actually be there: ensure_kv preserves both the rows and the record. */
@@ -5402,6 +5401,8 @@ static int q36_serve_start(Model *m, ServeReq *q, int **ids_out, int *np_out, fl
         if (pinned) { reuse = pinned; g_pin_use_logit = 1; }
     }
     g_echo_k = q->logprobs; g_echo_id = q->id;
+    /* Optional fourth ACCEPT field: actual retained token positions reused. */
+    printf("ACCEPT %s %d %d\n", q->id, np, reuse); fflush(stdout);
     if (!reuse) { reset_recurrent(m); m->kv_len = 0; }
     /* Per-REQUEST state, not per-process: without this the server keeps the
      * first request's prefill flag and expert-collection set forever, so

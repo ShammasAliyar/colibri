@@ -2975,6 +2975,27 @@ class HTTPTest(unittest.TestCase):
         finally:
             del self.engine.profile, self.engine.profile_seq
 
+    def test_activity_requires_auth_and_hides_content(self):
+        body = {"model": "test-model", "stream": True,
+                "messages": [{"role": "user", "content": "private source code"}],
+                "tools": [{"type": "function", "function": {"name": "read_file"}}]}
+        self.server.activity.begin("req_test", "/v1/chat/completions", body, "127.0.0.1")
+        try:
+            with urlopen(self.base + "/activity", timeout=2) as response:
+                self.assertEqual(json.load(response),
+                                 {"seq": 0, "content_capture": False, "requests": []})
+            with self.request("/activity") as response:
+                payload = json.load(response)
+            record = payload["requests"][-1]
+            self.assertEqual(record["message_count"], 1)
+            self.assertEqual(record["messages"],
+                             [{"index": 0, "role": "user", "chars": 19}])
+            self.assertEqual(record["tool_names"], ["read_file"])
+            self.assertNotIn("private source code", json.dumps(payload))
+        finally:
+            with self.server.activity.lock:
+                self.server.activity.records.pop("req_test", None)
+
     def test_browser_preflight(self):
         request = Request(self.base + "/v1/chat/completions", method="OPTIONS", headers={
             "Origin": "http://localhost:5173",

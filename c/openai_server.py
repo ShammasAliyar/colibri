@@ -333,6 +333,95 @@ class GenerationScheduler:
             self.condition.notify_all()
 
 
+class RequestActivity:
+    """Bounded, privacy-preserving request timeline for the operator UI."""
+
+    def __init__(self, capacity=120):
+        self.capacity = capacity
+        self.lock = threading.Lock()
+        self.records = collections.OrderedDict()
+        self.seq = 0
+
+    @staticmethod
+    def _text_size(value):
+        if isinstance(value, str):
+            return len(value)
+        if isinstance(value, list):
+            return sum(RequestActivity._text_size(item) for item in value)
+        if isinstance(value, dict):
+            return sum(RequestActivity._text_size(item) for item in value.values())
+        return 0
+
+    def begin(self, request_id, path, body, peer):
+        messages = body.get("messages") if isinstance(body.get("messages"), list) else []
+        capture = os.environ.get("COLI_ACTIVITY_CONTENT", "0") == "1"
+        message_rows = []
+        for index, message in enumerate(messages):
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content")
+            row = {"index": index, "role": str(message.get("role", "unknown")),
+                   "chars": self._text_size(content)}
+            if capture and isinstance(content, str):
+                row["preview"] = content[:240]
+            message_rows.append(row)
+        tools = body.get("tools") if isinstance(body.get("tools"), list) else []
+        tool_names = []
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            function = tool.get("function", tool)
+            if isinstance(function, dict) and isinstance(function.get("name"), str):
+                tool_names.append(function["name"][:80])
+        now = time.time()
+        record = {
+            "id": request_id, "endpoint": path, "client": peer,
+            "model": body.get("model"), "state": "received",
+            "started_at": now, "updated_at": now, "elapsed_s": 0.0,
+            "stream": body.get("stream") is True,
+            "max_tokens": body.get("max_tokens"), "messages": message_rows,
+            "message_count": len(messages),
+            "context_chars": (sum(row["chars"] for row in message_rows)
+                              if messages else self._text_size(body.get("prompt"))),
+            "tool_count": len(tools), "tool_names": tool_names[:24],
+            "output_chars": 0, "completion_tokens": 0, "prompt_tokens": None,
+            "queue_wait_ms": None, "first_output_ms": None,
+        }
+        with self.lock:
+            self.records[request_id] = record
+            self.records.move_to_end(request_id)
+            while len(self.records) > self.capacity:
+                self.records.popitem(last=False)
+            self.seq += 1
+
+    def update(self, request_id, **fields):
+        with self.lock:
+            record = self.records.get(request_id)
+            if record is None:
+                return
+            record.update(fields)
+            record["updated_at"] = time.time()
+            self.seq += 1
+
+    def finish(self, request_id, state, error=None):
+        fields = {"state": state, "finished_at": time.time()}
+        if error:
+            fields["error"] = str(error)[:240]
+        self.update(request_id, **fields)
+
+    def snapshot(self):
+        now = time.time()
+        with self.lock:
+            records = []
+            for record in self.records.values():
+                item = dict(record)
+                item["elapsed_s"] = max(0.0, item.get("finished_at", now) - item["started_at"])
+                records.append(item)
+            return {"seq": self.seq,
+                    "content_capture": os.environ.get("COLI_ACTIVITY_CONTENT", "0") == "1",
+                    "requests": records}
+
+
 def content_text(content, param):
     if isinstance(content, str):
         return content
@@ -5271,6 +5360,13 @@ class Engine:
         tune_child_env(child_env, arch)
         decision_head_env(child_env, model)
         resolved_cap = cap_for_arch(arch, cap, child_env, model=model)
+        self.expert_cache_cap = resolved_cap
+        try:
+            self.model_storage_gb = sum(
+                entry.stat().st_size for entry in Path(model).rglob("*") if entry.is_file()
+            ) / 1e9
+        except OSError:
+            self.model_storage_gb = 0.0
         child_env.pop("COLI_PROFILE_CAP", None)
         child_env.pop("COLI_PLAN_CAP", None)
         # Own process group on Windows: a CTRL_BREAK sent to the serve
@@ -5580,7 +5676,14 @@ class Engine:
                     with self.pending_lock:
                         entry = self.pending.get(request_id)
                     if entry is not None and entry.failed is None:
-                        entry.events.put(("accept", {"prompt_tokens": int(fields[2])}))
+                        info = {"prompt_tokens": int(fields[2])}
+                        if len(fields) >= 4:
+                            reused = int(fields[3])
+                            if not 0 <= reused <= info["prompt_tokens"]:
+                                raise RuntimeError("invalid reused token count")
+                            info["reused_tokens"] = reused
+                            info["fresh_tokens"] = info["prompt_tokens"] - reused
+                        entry.events.put(("accept", info))
                 elif kind == "DONE" and len(fields) >= 7:
                     request_id = fields[1]
                     stats = self._stats(fields[2:])
@@ -6068,6 +6171,7 @@ class APIServer(ThreadingHTTPServer):
         self.api_key = api_key
         self.max_tokens = max_tokens
         self.scheduler = GenerationScheduler(max_queue, queue_timeout, kv_slots)
+        self.activity = RequestActivity()
         self.kv_slots = kv_slots
         self.cors_origins = tuple(cors_origins)
         # Extra Host header values trusted past the DNS-rebinding guard, for a
@@ -6144,24 +6248,62 @@ class APIServer(ThreadingHTTPServer):
             modalities.append("image")
         return modalities
 
-    def generate(self, prompt, max_tokens, temperature, top_p, on_text, *args, **kwargs):
+    def generate(self, prompt, max_tokens, temperature, top_p, on_text, *args,
+                 activity_id=None, **kwargs):
         started = time.monotonic()
         first_output = False
+        output_chars = 0
+        last_activity = 0.0
+        profile_seq = getattr(self.engine, "profile_seq", 0)
+        original_accept = kwargs.get("on_accept")
+        def activity_accept(info):
+            if activity_id:
+                self.activity.update(activity_id, **{
+                    key: info[key] for key in ("prompt_tokens", "reused_tokens", "fresh_tokens") if key in info
+                })
+            if original_accept is not None:
+                original_accept(info)
+        if activity_id:
+            kwargs["on_accept"] = activity_accept
+        if activity_id:
+            self.activity.update(activity_id, state="generating",
+                                 inference_started_at=time.time())
 
         def measured(callback):
             def feed(text):
-                nonlocal first_output
+                nonlocal first_output, output_chars, last_activity
+                output_chars += len(text or "")
                 if text and not first_output:
                     first_output = True
-                    self.scheduler.observe_timing("first_output_seconds", time.monotonic() - started)
+                    first_s = time.monotonic() - started
+                    self.scheduler.observe_timing("first_output_seconds", first_s)
+                    if activity_id:
+                        self.activity.update(activity_id, first_output_ms=round(first_s * 1000),
+                                             state="streaming")
+                now = time.monotonic()
+                if activity_id and now - last_activity >= 0.25:
+                    self.activity.update(activity_id, output_chars=output_chars)
+                    last_activity = now
                 return callback(text)
             return feed
 
         if kwargs.get("on_tool") is not None:
             kwargs["on_tool"] = measured(kwargs["on_tool"])
         try:
-            return self.engine.generate(prompt, max_tokens, temperature, top_p,
-                                        measured(on_text), *args, **kwargs)
+            stats = self.engine.generate(prompt, max_tokens, temperature, top_p,
+                                         measured(on_text), *args, **kwargs)
+            if activity_id:
+                fields = {"output_chars": output_chars,
+                          "prompt_tokens": stats.get("prompt_tokens"),
+                          "completion_tokens": stats.get("completion_tokens"),
+                          "tokens_per_second": stats.get("tokens_per_second"),
+                          "cache_hit_percent": stats.get("cache_hit_percent"),
+                          "rss_gb": stats.get("rss_gb")}
+                if (getattr(self.engine, "profile_seq", 0) > profile_seq
+                        and getattr(self.engine, "profile", None)):
+                    fields["profile"] = dict(self.engine.profile[-1])
+                self.activity.update(activity_id, **fields)
+            return stats
         finally:
             self.scheduler.observe_timing("engine_call_seconds", time.monotonic() - started)
 
@@ -6603,6 +6745,8 @@ class APIHandler(BaseHTTPRequestHandler):
                     hwinfo = getattr(self.server.engine, "hwinfo", None) if self.server.engine else None
                     if hwinfo: payload["hwinfo"] = hwinfo
                     payload["capabilities"] = self.server.capabilities()
+                    payload["model_storage_gb"] = round(getattr(self.server.engine, "model_storage_gb", 0.0), 2)
+                    payload["expert_cache_cap"] = getattr(self.server.engine, "expert_cache_cap", 0)
                     if is_image_engine(self.server.engine):
                         payload["image"] = dict(getattr(self.server.engine, "info", None) or {})
                 self.send_json(200, payload, request_id)
@@ -6629,6 +6773,12 @@ class APIHandler(BaseHTTPRequestHandler):
                 if self._is_authed() and eng:
                     payload["seq"] = getattr(eng, "profile_seq", 0)
                     payload["turns"] = list(getattr(eng, "profile", ()) or ())
+                self.send_json(200, payload, request_id)
+                return
+            if path == "/activity":
+                payload = {"seq": 0, "content_capture": False, "requests": []}
+                if self._is_authed():
+                    payload = self.server.activity.snapshot()
                 self.send_json(200, payload, request_id)
                 return
             if self.serve_static(path):
@@ -6662,6 +6812,7 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         request_id = "req_" + uuid.uuid4().hex
+        tracked = False
         try:
             self._check_host()
             self.require_auth()
@@ -6674,6 +6825,10 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.log_error("request read deadline exceeded")
                 return
             path = urlsplit(self.path).path
+            if path in TEXT_ENDPOINTS:
+                self.server.activity.begin(request_id, path, body,
+                                           self.client_address[0] if self.client_address else "?")
+                tracked = True
             # A client written for Jev sends "jev-latest": on that route the
             # served model answers whatever name was asked for.
             if path != "/v1/systemone":
@@ -6699,13 +6854,23 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.anthropic_messages(body, request_id)
             else:
                 raise APIError(404, "Not found.", None, "not_found")
+            if tracked:
+                self.server.activity.finish(request_id, "completed")
         except APIError as error:
+            if tracked:
+                self.server.activity.finish(request_id, "failed", error.message)
             self._fail(error, request_id)
         except ClientCancelled:
+            if tracked:
+                self.server.activity.finish(request_id, "cancelled")
             pass
         except ConnectionError:
+            if tracked:
+                self.server.activity.finish(request_id, "cancelled", "client disconnected")
             pass                      # same widening as handle_one_request, same reason
         except Exception as error:
+            if tracked:
+                self.server.activity.finish(request_id, "failed", error)
             self.log_error("request failed: %s", error)
             try:
                 self._fail(APIError(500, "The colibri engine failed to process the request.",
@@ -7403,6 +7568,10 @@ class APIHandler(BaseHTTPRequestHandler):
         with self.server.scheduler.admit(self.client_disconnected, cache_slot) as admission, \
                 contextlib.ExitStack() as stream_cleanup:
             queue_wait, cache_slot = admission
+            self.server.activity.update(request_id, state="admitted",
+                                        queue_wait_ms=round(queue_wait * 1000),
+                                        context_chars=len(prompt), tool_count=len(tools or []),
+                                        max_tokens=maximum)
             queue_headers = {"x-colibri-queue-wait-ms": str(round(queue_wait * 1000))}
             if not stream:
                 output = []
@@ -7420,6 +7589,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 stats = self.server.generate(
                     prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
                     self.client_disconnected, grammar=grammar, stopped=generation_stopped,
+                    activity_id=request_id,
                     **({"on_tool": sideband.feed} if sideband.enabled else {}),
                     **({"audio": audio} if audio else {}),
                     **({"image": image} if image is not None else {}),
@@ -7645,6 +7815,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 stats = self.server.generate(
                     prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
                     self.client_disconnected, grammar=grammar, stopped=generation_stopped,
+                    activity_id=request_id,
                     **({"on_tool": sideband.feed} if sideband.enabled else {}),
                     on_accept=start_stream, **({"audio": audio} if audio else {}),
                     **({"image": image} if image is not None else {}),
@@ -7681,6 +7852,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 stats = self.server.generate(
                     prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
                     self.client_disconnected, grammar=grammar, stopped=stop_filter.stopped,
+                    activity_id=request_id,
                     on_accept=start_stream, **({"audio": audio} if audio else {}),
                     **({"image": image} if image is not None else {}),
                     **_engine_extension_args(engine_k))
@@ -7960,6 +8132,10 @@ class APIHandler(BaseHTTPRequestHandler):
         with self.server.scheduler.admit(self.client_disconnected, cache_slot) as admission, \
                 contextlib.ExitStack() as stream_cleanup:
             queue_wait, cache_slot = admission
+            self.server.activity.update(request_id, state="admitted",
+                                        queue_wait_ms=round(queue_wait * 1000),
+                                        context_chars=len(prompt), tool_count=len(tools or []),
+                                        max_tokens=maximum)
             queue_headers = {"x-colibri-queue-wait-ms": str(round(queue_wait * 1000))}
             if not stream:
                 output = []
@@ -7973,6 +8149,7 @@ class APIHandler(BaseHTTPRequestHandler):
                 stats = self.server.generate(
                     prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
                     self.client_disconnected, grammar=grammar, stopped=generation_stopped,
+                    activity_id=request_id,
                     **({"on_tool": sideband.feed} if sideband.enabled else {}),
                     **({"image": image} if image is not None else {}))
                 stop_filter.finish()
@@ -8120,6 +8297,7 @@ class APIHandler(BaseHTTPRequestHandler):
             stats = self.server.generate(
                 prompt, maximum, temperature, top_p, stop_filter.feed, cache_slot,
                 lambda: not connected[0], grammar=grammar, stopped=generation_stopped,
+                activity_id=request_id,
                 **({"on_tool": sideband.feed} if sideband.enabled else {}),
                 **({"image": image} if image is not None else {}))
             stop_filter.finish()

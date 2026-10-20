@@ -10,7 +10,7 @@ const zhCN: Record<string, string> = {
   "sidebar.endpoint": "API 端点",
   "sidebar.apiKey": "API 密钥",
   "sidebar.apiKeyPlaceholder": "可选",
-  "sidebar.apiKeyHelp": "仅保存在内存中 · 发送到此端点",
+  "sidebar.apiKeyHelp": "在此浏览器标签页中保存 · 仅发送到此端点",
   "sidebar.probe": "探测服务器",
   "status.connected": "引擎已连接",
   "status.notConnected": "未连接",
